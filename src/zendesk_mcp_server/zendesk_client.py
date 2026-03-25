@@ -243,6 +243,101 @@ class ZendeskClient:
         except Exception as e:
             raise Exception(f"Failed to get latest tickets: {str(e)}")
 
+    def search_tickets(self, query: str, page: int = 1, per_page: int = 100) -> Dict[str, Any]:
+        """
+        Search Zendesk tickets using ZQL (Zendesk Query Language).
+
+        Supports full ZQL syntax, e.g.:
+          "fountain pen" created>7days
+          "sync error" created>=2026-03-01 created<=2026-03-07
+          "eraser" type:ticket status:open
+
+        Returns count, results (up to per_page), and pagination info.
+        Zendesk Search caps at 1,000 results per query.
+        """
+        try:
+            params = {
+                'query': query,
+                'page': str(page),
+                'per_page': str(min(per_page, 100)),
+            }
+            query_string = urllib.parse.urlencode(params)
+            url = f"{self.base_url}/search.json?{query_string}"
+
+            req = urllib.request.Request(url)
+            req.add_header('Authorization', self.auth_header)
+            req.add_header('Content-Type', 'application/json')
+
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode())
+
+            results = []
+            for item in data.get('results', []):
+                if item.get('result_type') != 'ticket':
+                    continue
+                results.append({
+                    'id': item.get('id'),
+                    'subject': item.get('subject'),
+                    'description': item.get('description'),
+                    'status': item.get('status'),
+                    'priority': item.get('priority'),
+                    'created_at': item.get('created_at'),
+                    'updated_at': item.get('updated_at'),
+                    'requester_id': item.get('requester_id'),
+                    'assignee_id': item.get('assignee_id'),
+                    'tags': item.get('tags', []),
+                })
+
+            return {
+                'count': data.get('count', 0),
+                'results': results,
+                'page': page,
+                'per_page': per_page,
+                'has_more': data.get('next_page') is not None,
+                'next_page': page + 1 if data.get('next_page') else None,
+            }
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode() if e.fp else "No response body"
+            raise Exception(f"Failed to search tickets: HTTP {e.code} - {e.reason}. {error_body}")
+        except Exception as e:
+            raise Exception(f"Failed to search tickets: {str(e)}")
+
+    def list_ticket_fields(self) -> List[Dict[str, Any]]:
+        """
+        Fetch all active custom ticket field definitions.
+        Useful for mapping custom_field IDs to their labels and types.
+        """
+        try:
+            url = f"{self.base_url}/ticket_fields.json"
+            req = urllib.request.Request(url)
+            req.add_header('Authorization', self.auth_header)
+            req.add_header('Content-Type', 'application/json')
+
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode())
+
+            fields = []
+            for f in data.get('ticket_fields', []):
+                if not f.get('active', True):
+                    continue
+                fields.append({
+                    'id': f.get('id'),
+                    'type': f.get('type'),
+                    'title': f.get('title'),
+                    'key': f.get('key'),
+                    'required': f.get('required', False),
+                    'custom_field_options': [
+                        {'name': o.get('name'), 'value': o.get('value')}
+                        for o in f.get('custom_field_options', [])
+                    ],
+                })
+            return fields
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode() if e.fp else "No response body"
+            raise Exception(f"Failed to list ticket fields: HTTP {e.code} - {e.reason}. {error_body}")
+        except Exception as e:
+            raise Exception(f"Failed to list ticket fields: {str(e)}")
+
     def get_all_articles(self) -> Dict[str, Any]:
         """
         Fetch help center articles as knowledge base.

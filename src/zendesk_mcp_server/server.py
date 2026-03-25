@@ -240,6 +240,46 @@ async def handle_list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="search_tickets",
+            description=(
+                "Search Zendesk tickets using ZQL (Zendesk Query Language). "
+                "Supports full ZQL syntax including keywords, date ranges, status, tags, and boolean operators. "
+                "Examples: '\"fountain pen\" created>7days', '\"sync error\" status:open created>=2026-03-01 created<=2026-03-07', "
+                "'\"eraser\" -\"billing\" type:ticket'. "
+                "Returns count (total matches), results (up to per_page tickets), and pagination info. "
+                "Zendesk caps search at 1,000 results per query — use date ranges to stay under the cap."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "ZQL search query string"
+                    },
+                    "page": {
+                        "type": "integer",
+                        "description": "Page number (1-based)",
+                        "default": 1
+                    },
+                    "per_page": {
+                        "type": "integer",
+                        "description": "Results per page (max 100)",
+                        "default": 100
+                    }
+                },
+                "required": ["query"]
+            }
+        ),
+        types.Tool(
+            name="list_ticket_fields",
+            description="List all active Zendesk custom ticket field definitions. Returns field IDs, types, titles, and option values. Useful for understanding custom field mappings before filtering or updating tickets.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        ),
+        types.Tool(
             name="update_ticket",
             description="Update fields on an existing Zendesk ticket (e.g., status, priority, assignee_id)",
             inputSchema={
@@ -353,6 +393,26 @@ async def handle_call_tool(
                     type="text",
                     text=json.dumps({"content_type": content_type, "data_base64": result["data"]})
                 )]
+
+        elif name == "search_tickets":
+            if not arguments or "query" not in arguments:
+                raise ValueError("Missing required argument: query")
+            results = zendesk_client.search_tickets(
+                query=arguments["query"],
+                page=arguments.get("page", 1),
+                per_page=arguments.get("per_page", 100),
+            )
+            return [types.TextContent(
+                type="text",
+                text=json.dumps(results, indent=2)
+            )]
+
+        elif name == "list_ticket_fields":
+            fields = zendesk_client.list_ticket_fields()
+            return [types.TextContent(
+                type="text",
+                text=json.dumps(fields, indent=2)
+            )]
 
         elif name == "update_ticket":
             if not arguments:
